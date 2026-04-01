@@ -1,75 +1,94 @@
 import streamlit as st
 import duckdb_engine as db
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import os
 from pathlib import Path
 
-# Configure page
+# Configure page with DARK THEME
 st.set_page_config(
-    page_title="CSV Explorer Agent",
+    page_title="CSV/PDF Explorer Agent",
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
-        'About': "### CSV Explorer Agent\nExplore & analyze CSV files locally with DuckDB"
+        'About': "### CSV/PDF Explorer Agent\nExplore & analyze CSV/PDF files locally with DuckDB"
     }
 )
 
-# Custom CSS for better styling
+# Apply dark theme
 st.markdown("""
 <style>
+    body {
+        background-color: #0e1117;
+        color: #c9d1d9;
+    }
+    
     .main-header {
         font-size: 2.5rem;
         font-weight: 700;
-        color: #1f77b4;
+        background: linear-gradient(135deg, #58a6ff, #79c0ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
         margin-bottom: 0.5rem;
     }
+    
     .sub-header {
         font-size: 1rem;
-        color: #666;
+        color: #8b949e;
         margin-bottom: 1.5rem;
     }
+    
     .metric-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #1f6feb, #388bfd);
         color: white;
         padding: 1.5rem;
         border-radius: 0.5rem;
         margin: 0.5rem 0;
+        border: 1px solid #30363d;
     }
+    
     .info-box {
-        background-color: #e8f4f8;
-        border-left: 4px solid #0288d1;
+        background-color: #0d1117;
+        border-left: 4px solid #58a6ff;
         padding: 1rem;
         border-radius: 0.4rem;
         margin: 1rem 0;
+        border: 1px solid #30363d;
     }
+    
     .success-box {
-        background-color: #e8f5e9;
-        border-left: 4px solid #4caf50;
+        background-color: #0d1117;
+        border-left: 4px solid #3fb950;
         padding: 1rem;
         border-radius: 0.4rem;
+        border: 1px solid #30363d;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="main-header">📊 CSV Explorer Agent</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">💡 Upload, filter, query & export your CSV data with ease</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">📊 CSV/PDF Explorer Agent</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">💡 Upload, filter, visualize, analyze & export your data with advanced analytics</p>', unsafe_allow_html=True)
 
 # Initialize the database on startup
 if 'db_initialized' not in st.session_state:
     db.init_db()
     st.session_state.db_initialized = True
     st.session_state.filters = {}
+
+# ======================
 # SIDEBAR: File Upload
 # ======================
 with st.sidebar:
     st.markdown("### 📁 Data Management")
     
-    # File uploader with better UI
+    # File uploader for CSV and PDF
     uploaded_files = st.file_uploader(
-        "📤 Upload CSV Files",
-        type="csv",
+        "📤 Upload Files (CSV or PDF)",
+        type=["csv", "pdf"],
         accept_multiple_files=True,
-        help="Select one or multiple CSV files to analyze"
+        help="Select one or multiple CSV/PDF files to analyze"
     )
     
     if uploaded_files:
@@ -91,7 +110,10 @@ with st.sidebar:
                 f.write(file.getbuffer())
             
             # Ingest into DuckDB
-            status_msg = db.ingest_csv(file_path)
+            if file.name.lower().endswith('.pdf'):
+                status_msg = db.ingest_pdf(file_path)
+            else:
+                status_msg = db.ingest_csv(file_path)
             
             if "✅" in status_msg:
                 successful += 1
@@ -106,7 +128,7 @@ with st.sidebar:
         else:
             st.warning(f"⚠️ {successful}/{len(uploaded_files)} files loaded. Check for errors above.")
     
-    # Display database info with better styling
+    # Display database info
     st.markdown("---")
     st.markdown("### 📊 Database Status")
     
@@ -120,23 +142,27 @@ with st.sidebar:
         with col2:
             st.metric("📋 Columns", len(col_names))
         
-        # Show columns
+        # Show columns with types
         with st.expander("🔍 View Columns", expanded=False):
+            col_types = db.get_column_types()
             for i, col in enumerate(col_names, 1):
-                st.text(f"{i}. {col}")
+                col_type = col_types.get(col, "Unknown")
+                st.text(f"{i}. {col} ({col_type})")
     else:
         st.info("""
         ### 🚀 Get Started
-        1. Upload CSV files using the button above
-        2. Use filters to explore data
-        3. Write SQL queries for advanced analysis
+        1. Upload CSV/PDF files
+        2. Explore with filters
+        3. Create charts
+        4. Detect outliers
+        5. Export results
         """)
     
-    # Filters section - improved
+    # Filters section
     if db.table_exists():
         st.markdown("---")
         st.markdown("### 🔍 Filters")
-        st.caption("Select values to filter data (AND logic between columns)")
+        st.caption("AND logic between columns")
         
         column_names = db.get_column_names()
         filters = {}
@@ -144,7 +170,7 @@ with st.sidebar:
         for col in column_names:
             unique_vals = db.get_unique_values(col)
             
-            if len(unique_vals) <= 50:  # Only show multiselect for reasonable cardinality
+            if len(unique_vals) <= 50:
                 selected_vals = st.multiselect(
                     col,
                     options=unique_vals,
@@ -154,7 +180,7 @@ with st.sidebar:
                 if selected_vals:
                     filters[col] = selected_vals
             else:
-                st.caption(f"⚠️ {col} has {len(unique_vals)} unique values - too many to filter")
+                st.caption(f"⚠️ {col}: {len(unique_vals)} values")
         
         st.session_state.filters = filters
         
@@ -170,26 +196,26 @@ with st.sidebar:
 # MAIN CONTENT: Tabs
 # ======================
 if db.table_exists():
-    tab1, tab2, tab3 = st.tabs(["📋 Data Preview", "⚡ SQL Query", "💾 Export Data"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📋 Data Preview",
+        "📊 Charts & Visualization",
+        "🎯 Outlier Detection",
+        "⚡ SQL Query",
+        "📈 Statistics",
+        "💾 Export"
+    ])
     
-    # -------- TAB 1: DATA PREVIEW --------
-    with tab1:
-        st.markdown("### Explore Your Data")
-        
-        # Build filtered query
+    # Helper function for filtering
+    def get_filtered_data(limit=1000):
         base_query = "SELECT * FROM csv_data"
         where_clauses = []
         
         for col, values in st.session_state.filters.items():
             if values:
-                # Handle different data types
                 try:
-                    # Try numeric
                     in_list = ", ".join([str(float(v)) for v in values])
                 except:
-                    # Fall back to string
                     in_list = ", ".join([f"'{str(v).replace(chr(39), chr(39)+chr(39))}'" for v in values])
-                
                 where_clauses.append(f"{col} IN ({in_list})")
         
         if where_clauses:
@@ -197,16 +223,18 @@ if db.table_exists():
         else:
             full_query = base_query
         
-        # Add limit for display
-        display_query = full_query + " LIMIT 1000"
+        return full_query + f" LIMIT {limit}"
+    
+    # -------- TAB 1: DATA PREVIEW --------
+    with tab1:
+        st.markdown("### Explore Your Data")
         
-        # Run the query
+        display_query = get_filtered_data(1000)
         result_df, error = db.run_query(display_query)
         
         if error:
             st.error(f"❌ Query Error: {error}")
         else:
-            # Display results with metrics
             col1, col2, col3 = st.columns([1, 1, 2])
             with col1:
                 st.metric("📊 Rows", len(result_df))
@@ -215,66 +243,188 @@ if db.table_exists():
             with col3:
                 if len(st.session_state.filters) > 0:
                     active_filters = ", ".join(st.session_state.filters.keys())
-                    st.info(f"🔍 **Filters Active:** {active_filters}")
+                    st.info(f"🔍 **Filters:** {active_filters}")
             
             st.markdown("---")
-            
-            # Scrollable dataframe
-            st.dataframe(
-                result_df,
-                use_container_width=True,
-                height=400,
-                hide_index=True
+            st.dataframe(result_df, use_container_width=True, height=400, hide_index=True)
+    
+    # -------- TAB 2: CHARTS & VISUALIZATION --------
+    with tab2:
+        st.markdown("### Data Visualization")
+        
+        numeric_cols = db.get_numeric_columns()
+        date_cols = db.get_date_columns()
+        all_cols = db.get_column_names()
+        
+        if not numeric_cols:
+            st.warning("⚠️ No numeric columns found for charting")
+        else:
+            chart_type = st.radio(
+                "Choose visualization type:",
+                ["📊 Histogram", "📈 Line Chart", "🔵 Scatter Plot", "📦 Box Plot", "🍰 Pie Chart", "📊 Bar Chart"],
+                horizontal=True
             )
             
-            # Summary stats
-            col_summary = st.columns([1, 1, 1])
-            with col_summary[0]:
-                if len(st.session_state.filters) > 0:
-                    st.caption(f"📌 Showing filtered results")
+            result_df, _ = db.run_query(get_filtered_data())
+            
+            if chart_type == "📊 Histogram":
+                col = st.selectbox("Select numeric column:", numeric_cols)
+                fig = px.histogram(
+                    result_df,
+                    x=col,
+                    nbins=30,
+                    template="plotly_dark",
+                    title=f"Distribution of {col}"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            elif chart_type == "📈 Line Chart":
+                col1 = st.selectbox("X-axis (numeric or date):", all_cols)
+                col2 = st.selectbox("Y-axis (numeric):", numeric_cols)
+                fig = px.line(
+                    result_df.sort_values(col1),
+                    x=col1,
+                    y=col2,
+                    template="plotly_dark",
+                    title=f"{col2} over {col1}"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            elif chart_type == "🔵 Scatter Plot":
+                col1 = st.selectbox("X-axis:", numeric_cols)
+                col2 = st.selectbox("Y-axis:", numeric_cols, key="scatter_y")
+                fig = px.scatter(
+                    result_df,
+                    x=col1,
+                    y=col2,
+                    template="plotly_dark",
+                    title=f"{col2} vs {col1}",
+                    hover_data=all_cols[:5]
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            elif chart_type == "📦 Box Plot":
+                col = st.selectbox("Select numeric column:", numeric_cols, key="box_col")
+                group_by = st.selectbox("Group by (optional):", ["None"] + all_cols)
+                
+                if group_by == "None":
+                    fig = go.Figure(data=[go.Box(y=result_df[col], template="plotly_dark")])
+                    fig.update_layout(title=f"Box Plot of {col}")
                 else:
-                    st.caption(f"📌 Showing first 1000 rows")
+                    fig = px.box(
+                        result_df,
+                        y=col,
+                        x=group_by,
+                        template="plotly_dark",
+                        title=f"Box Plot of {col} by {group_by}"
+                    )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            elif chart_type == "🍰 Pie Chart":
+                col = st.selectbox("Select column:", all_cols, key="pie_col")
+                fig = px.pie(
+                    result_df,
+                    names=col,
+                    template="plotly_dark",
+                    title=f"Distribution of {col}"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            elif chart_type == "📊 Bar Chart":
+                col1 = st.selectbox("X-axis:", all_cols, key="bar_x")
+                col2 = st.selectbox("Y-axis (numeric):", numeric_cols, key="bar_y")
+                
+                fig = px.bar(
+                    result_df.groupby(col1)[col2].sum().reset_index(),
+                    x=col1,
+                    y=col2,
+                    template="plotly_dark",
+                    title=f"{col2} by {col1}"
+                )
+                st.plotly_chart(fig, use_container_width=True)
     
-    # -------- TAB 2: SQL QUERY --------
-    with tab2:
+    # -------- TAB 3: OUTLIER DETECTION --------
+    with tab3:
+        st.markdown("### Outlier Detection")
+        
+        numeric_cols = db.get_numeric_columns()
+        
+        if not numeric_cols:
+            st.warning("⚠️ No numeric columns for outlier detection")
+        else:
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                col_to_analyze = st.selectbox("Select column to analyze:", numeric_cols)
+            with col2:
+                method = st.radio("Method:", ["IQR", "Z-Score"], horizontal=True)
+            
+            if st.button("🔍 Detect Outliers", use_container_width=True, type="primary"):
+                outlier_df, error = db.detect_outliers(col_to_analyze, "iqr" if method == "IQR" else "zscore")
+                
+                if error:
+                    st.error(f"Error: {error}")
+                else:
+                    outlier_count = outlier_df['is_outlier'].sum()
+                    normal_count = len(outlier_df) - outlier_count
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Records", len(outlier_df))
+                    with col2:
+                        st.metric("🚨 Outliers", outlier_count)
+                    with col3:
+                        st.metric("✅ Normal", normal_count)
+                    
+                    st.markdown("---")
+                    
+                    # Display outliers
+                    st.subheader("Detected Outliers")
+                    outliers_only = outlier_df[outlier_df['is_outlier'] == True]
+                    
+                    if len(outliers_only) > 0:
+                        st.dataframe(outliers_only, use_container_width=True, hide_index=True)
+                        
+                        # Visualization
+                        fig = px.scatter(
+                            outlier_df,
+                            x=outlier_df.index,
+                            y=col_to_analyze,
+                            color='is_outlier',
+                            color_discrete_map={True: '#f85149', False: '#58a6ff'},
+                            title=f"Outliers in {col_to_analyze}",
+                            template="plotly_dark"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.success("✅ No outliers detected!")
+    
+    # -------- TAB 4: SQL QUERY --------
+    with tab4:
         st.markdown("### Advanced SQL Query")
-        st.caption("💡 Write custom SQL queries using DuckDB syntax. Table name: **csv_data**")
+        st.caption("💡 Write custom SQL queries using DuckDB syntax")
         
         col_names = db.get_column_names()
         
-        # Show schema in expandable
-        with st.expander("📋 View Table Schema", expanded=False):
-            schema_text = "\n".join([f"• {col}" for col in col_names])
-            st.markdown(f"**Columns in csv_data:**\n{schema_text}")
-            
-            st.markdown("### Example Queries:")
-            examples = [
-                "```sql\nSELECT * FROM csv_data LIMIT 50;\n```",
-                "```sql\nSELECT COUNT(*) as total FROM csv_data;\n```",
-                "```sql\nSELECT * FROM csv_data WHERE column_name = 'value';\n```",
-                "```sql\nSELECT column_name, COUNT(*) as count FROM csv_data GROUP BY column_name ORDER BY count DESC;\n```"
-            ]
-            for example in examples:
-                st.markdown(example)
+        # Show schema
+        with st.expander("📋 Table Schema", expanded=False):
+            col_types = db.get_column_types()
+            schema_info = "\n".join([f"• {col} ({col_types.get(col, 'Unknown')})" for col in col_names])
+            st.markdown(f"**Columns:**\n{schema_info}")
         
-        # Query input
         custom_sql = st.text_area(
             "✍️ Enter your SQL query:",
-            height=180,
+            height=150,
             placeholder="SELECT * FROM csv_data WHERE ...",
-            value="SELECT * FROM csv_data LIMIT 100",
-            key="sql_query"
+            value="SELECT * FROM csv_data LIMIT 100"
         )
         
-        col1, col2, col3 = st.columns([1, 4, 1])
+        col1, col2 = st.columns([1, 4])
         with col1:
             run_query_btn = st.button("🚀 Execute", use_container_width=True, type="primary")
-        with col3:
-            clear_btn = st.button("🔄 Reset", use_container_width=True)
-        
-        if clear_btn:
-            st.session_state.sql_query = "SELECT * FROM csv_data LIMIT 100"
-            st.rerun()
+        with col2:
+            if st.button("🔄 Reset Query", use_container_width=True):
+                st.rerun()
         
         if run_query_btn:
             if not custom_sql.strip():
@@ -298,39 +448,55 @@ if db.table_exists():
                     st.markdown("---")
                     st.dataframe(result_df, use_container_width=True, hide_index=True)
     
-    # -------- TAB 3: EXPORT --------
-    with tab3:
+    # -------- TAB 5: STATISTICS --------
+    with tab5:
+        st.markdown("### Statistical Summary")
+        
+        result_df, _ = db.run_query(get_filtered_data())
+        
+        numeric_cols = db.get_numeric_columns()
+        
+        if numeric_cols:
+            selected_cols = st.multiselect(
+                "Select columns for statistics:",
+                numeric_cols,
+                default=numeric_cols[:min(3, len(numeric_cols))]
+            )
+            
+            if selected_cols:
+                stats_df = result_df[selected_cols].describe().T
+                st.dataframe(stats_df, use_container_width=True)
+                
+                st.markdown("---")
+                st.subheader("Correlation Matrix")
+                
+                if len(selected_cols) > 1:
+                    corr_matrix = result_df[selected_cols].corr()
+                    fig = px.imshow(
+                        corr_matrix,
+                        color_continuous_scale="RdBu_r",
+                        template="plotly_dark",
+                        title="Correlation Matrix"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Select at least 2 columns to see correlation")
+        else:
+            st.warning("⚠️ No numeric columns available")
+    
+    # -------- TAB 6: EXPORT --------
+    with tab6:
         st.markdown("### Export Your Data")
         st.caption("💾 Download filtered data or custom query results")
         
         export_option = st.radio(
             "What would you like to export?",
-            [
-                "Filtered Data",
-                "Custom SQL Query"
-            ],
+            ["Filtered Data", "Custom SQL Query"],
             horizontal=True
         )
         
         if export_option == "Filtered Data":
-            base_query = "SELECT * FROM csv_data"
-            where_clauses = []
-            
-            for col, values in st.session_state.filters.items():
-                if values:
-                    try:
-                        in_list = ", ".join([str(float(v)) for v in values])
-                    except:
-                        in_list = ", ".join([f"'{str(v).replace(chr(39), chr(39)+chr(39))}'" for v in values])
-                    where_clauses.append(f"{col} IN ({in_list})")
-            
-            if where_clauses:
-                export_query = base_query + " WHERE " + " AND ".join(where_clauses)
-            else:
-                export_query = base_query
-                
-            st.info(f"**Query:** `{export_query[:100]}...`" if len(export_query) > 100 else f"**Query:** `{export_query}`")
-            
+            export_query = get_filtered_data(limit=999999)
         else:
             export_query = st.text_area(
                 "Enter your SQL query:",
@@ -339,11 +505,7 @@ if db.table_exists():
                 value="SELECT * FROM csv_data LIMIT 1000"
             )
         
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            export_btn = st.button("📥 Prepare Export", use_container_width=True, type="primary")
-        
-        if export_btn:
+        if st.button("📥 Prepare Export", use_container_width=True, type="primary"):
             with st.spinner("⏳ Preparing export..."):
                 result_df, error = db.run_query(export_query)
             
@@ -352,89 +514,99 @@ if db.table_exists():
             else:
                 st.success(f"✅ Ready! {len(result_df):,} rows prepared")
                 
-                col_exp1, col_exp2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 
                 # CSV download
-                with col_exp1:
+                with col1:
                     csv = result_df.to_csv(index=False)
                     st.download_button(
-                        label="📥 Download CSV",
+                        label="📥 CSV",
                         data=csv,
                         file_name="exported_data.csv",
                         mime="text/csv",
                         use_container_width=True
                     )
                 
-                # Excel download (if openpyxl available)
-                with col_exp2:
+                # Excel download
+                with col2:
                     try:
-                        import openpyxl
                         import io
-                        
                         excel_buffer = io.BytesIO()
                         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                             result_df.to_excel(writer, sheet_name='Data', index=False)
                         excel_buffer.seek(0)
                         
                         st.download_button(
-                            label="📊 Download Excel",
+                            label="📊 Excel",
                             data=excel_buffer.getvalue(),
                             file_name="exported_data.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True
                         )
                     except ImportError:
-                        st.caption("💡 Install `openpyxl` for Excel export")
+                        st.caption("Excel not available")
+                
+                # JSON download
+                with col3:
+                    json_data = result_df.to_json(orient='records', indent=2)
+                    st.download_button(
+                        label="🔗 JSON",
+                        data=json_data,
+                        file_name="exported_data.json",
+                        mime="application/json",
+                        use_container_width=True
+                    )
                 
                 # Preview
-                with st.expander("👁️ Preview Data (First 100 rows)", expanded=False):
-                    st.dataframe(result_df.head(100), use_container_width=True, hide_index=True)
+                with st.expander("👁️ Preview (First 50 rows)", expanded=False):
+                    st.dataframe(result_df.head(50), use_container_width=True, hide_index=True)
 
 else:
-    # Welcome screen when no data
+    # Welcome screen
     col1, col2 = st.columns([2, 1])
     
     with col1:
         st.markdown("""
-        ## 🎯 Welcome to CSV Explorer Agent!
+        ## 🎯 Welcome to CSV/PDF Explorer Agent!
         
-        ### Get Started in 3 Steps:
+        ### Features:
         
-        **1️⃣ Upload Files**
-        - Use the sidebar to upload one or more CSV files
-        - Supported formats: .csv
+        **📊 Data Exploration**
+        - Multi-file upload (CSV & PDF)
+        - Smart filtering
+        - Real-time data preview
         
-        **2️⃣ Explore Data**
-        - Use filters to narrow down your data
-        - View results instantly
+        **📈 Visualization**
+        - Histograms, line charts, scatter plots
+        - Box plots, pie charts, bar charts
+        - Interactive Plotly charts
         
-        **3️⃣ Query & Export**
-        - Write SQL queries for advanced analysis
-        - Export results as CSV or Excel
+        **🎯 Advanced Analytics**
+        - Outlier detection (IQR & Z-Score)
+        - Statistical summary
+        - Correlation analysis
         
-        ### Key Features:
-        - ✨ Multi-file upload
-        - 🔍 Smart filtering
-        - ⚡ SQL query builder
-        - 💾 Export functionality
-        - 📊 Real-time insights
+        **⚡ Query & Export**
+        - SQL query builder
+        - Export as CSV, Excel, JSON
+        - Large dataset support
         """)
     
     with col2:
         st.markdown("""
-        ### 💡 Tips
+        ### 💡 Quick Start
         
-        - Start with small files
-        - Use filters for quick analysis
-        - Check the schema before writing queries
-        - Export filtered results
+        1. Upload files
+        2. Filter data
+        3. Create charts
+        4. Detect outliers
+        5. Export results
         
-        ### Resources
+        ### 📚 Resources
         
-        [DuckDB Docs →](https://duckdb.org/docs/)
-        
-        [SQL Tutorial →](https://www.w3schools.com/sql/)
+        [DuckDB](https://duckdb.org/)
+        [SQL Tutorial](https://w3schools.com/sql)
         """)
     
     st.markdown("---")
-    st.info("👈 **Ready?** Upload CSV files using the sidebar to begin!")
+    st.info("👈 **Ready?** Upload CSV/PDF files using the sidebar to begin!")
