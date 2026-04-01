@@ -8,6 +8,10 @@ env/
 data/*.duckdb
 data/*.duckdb.wal
 
+# Data files (keep local, don't push)
+data/*.csv
+data/*.pdf
+
 # Python
 __pycache__/
 *.py[cod]
