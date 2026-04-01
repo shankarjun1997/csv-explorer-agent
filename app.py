@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import os
 from datetime import datetime
 from config import APP_NAME, APP_VERSION, APP_DESCRIPTION
-from duckdb_engine import db
+from duckdb_engine import get_db
 from logger import setup_logger
 from utils import (
     format_number, format_file_size, 
@@ -158,7 +158,7 @@ st.markdown("""
 # ============================================================================
 
 if 'db_initialized' not in st.session_state:
-    db.init_db()
+    get_db().init_db()
     st.session_state.db_initialized = True
     st.session_state.filters = {}
 
@@ -215,9 +215,9 @@ with st.sidebar:
                     f.write(file.getbuffer())
                 
                 if file.name.lower().endswith('.pdf'):
-                    msg = db.ingest_pdf(file_path)
+                    msg = get_db().ingest_pdf(file_path)
                 else:
-                    msg = db.ingest_csv(file_path)
+                    msg = get_db().ingest_csv(file_path)
                 
                 if "✅" in msg:
                     successful += 1
@@ -233,9 +233,9 @@ with st.sidebar:
     st.markdown("---")
     st.markdown('<h3 style="color: #58a6ff;">📊 Database Status</h3>', unsafe_allow_html=True)
     
-    if db.table_exists():
-        col_names = db.get_column_names()
-        row_count = db.get_row_count()
+    if get_db().table_exists():
+        col_names = get_db().get_column_names()
+        row_count = get_db().get_row_count()
         
         col1, col2 = st.columns(2)
         with col1:
@@ -243,7 +243,7 @@ with st.sidebar:
         with col2:
             st.metric("Columns", len(col_names))
         
-        col_types = db.get_column_types()
+        col_types = get_db().get_column_types()
         numeric_cols = [c for c in col_names if c in col_types]
         
         with st.expander("🔍 Column Details"):
@@ -252,7 +252,7 @@ with st.sidebar:
                 st.caption(f"• **{col}** ({col_type})")
         
         # Data quality metrics
-        result_df, _ = db.run_query("SELECT * FROM csv_data LIMIT 10000")
+        result_df, _ = get_db().run_query("SELECT * FROM csv_data LIMIT 10000")
         if result_df is not None:
             quality = get_data_quality_metrics(result_df)
             if quality:
@@ -277,11 +277,11 @@ with st.sidebar:
         st.markdown("---")
         st.markdown('<h3 style="color: #58a6ff;">🔍 Filters</h3>', unsafe_allow_html=True)
         
-        col_names = db.get_column_names()
+        col_names = get_db().get_column_names()
         filters = {}
         
         for col in col_names:
-            unique_vals = db.get_unique_values(col)
+            unique_vals = get_db().get_unique_values(col)
             
             if len(unique_vals) <= 50:
                 selected_vals = st.multiselect(
@@ -315,7 +315,7 @@ with st.sidebar:
 # MAIN CONTENT
 # ============================================================================
 
-if not db.table_exists():
+if not get_db().table_exists():
     # Welcome screen
     st.markdown('<h2 class="section-title">Welcome to Enterprise Data Explorer</h2>', unsafe_allow_html=True)
     
@@ -367,7 +367,7 @@ else:
         where_clause, _ = build_where_clause(st.session_state.filters)
         query = f"SELECT * FROM csv_data {where_clause} LIMIT 1000"
         
-        result_df, error = db.run_query(query)
+        result_df, error = get_db().run_query(query)
         
         if error:
             st.error(f"❌ Query Error: {error}")
@@ -392,9 +392,9 @@ else:
     with tab2:
         st.markdown('<h2 class="section-title">Data Visualization</h2>', unsafe_allow_html=True)
         
-        numeric_cols = db.get_numeric_columns()
-        date_cols = db.get_date_columns()
-        all_cols = db.get_column_names()
+        numeric_cols = get_db().get_numeric_columns()
+        date_cols = get_db().get_date_columns()
+        all_cols = get_db().get_column_names()
         
         if not numeric_cols:
             st.warning("⚠️ No numeric columns available for visualization")
@@ -408,7 +408,7 @@ else:
                     label_visibility="collapsed"
                 )
             
-            result_df, _ = db.run_query(f"SELECT * FROM csv_data {build_where_clause(st.session_state.filters)[0]}")
+            result_df, _ = get_db().run_query(f"SELECT * FROM csv_data {build_where_clause(st.session_state.filters)[0]}")
             
             if result_df is not None and len(result_df) > 0:
                 if chart_type == "📊 Histogram":
@@ -453,7 +453,7 @@ else:
         
         if analysis_type == "Outliers":
             st.markdown('<h3 class="subsection-title">Outlier Detection</h3>', unsafe_allow_html=True)
-            numeric_cols = db.get_numeric_columns()
+            numeric_cols = get_db().get_numeric_columns()
             if numeric_cols:
                 col1, col2 = st.columns([2, 1])
                 with col1:
@@ -462,7 +462,7 @@ else:
                     method = st.radio("Method", ["IQR", "Z-Score"], horizontal=True)
                 
                 if st.button("🔍 Detect", use_container_width=True, type="primary"):
-                    outlier_df, error = db.detect_outliers(col_to_analyze, "iqr" if method == "IQR" else "zscore")
+                    outlier_df, error = get_db().detect_outliers(col_to_analyze, "iqr" if method == "IQR" else "zscore")
                     if error:
                         st.error(error)
                     else:
@@ -483,20 +483,20 @@ else:
         
         elif analysis_type == "Statistics":
             st.markdown('<h3 class="subsection-title">Statistical Summary</h3>', unsafe_have_html=True)
-            numeric_cols = db.get_numeric_columns()
+            numeric_cols = get_db().get_numeric_columns()
             if numeric_cols:
                 selected_cols = st.multiselect("Columns", numeric_cols, default=numeric_cols[:min(3, len(numeric_cols))])
                 if selected_cols:
-                    result_df, _ = db.run_query(f"SELECT * FROM csv_data {build_where_clause(st.session_state.filters)[0]} LIMIT 10000")
+                    result_df, _ = get_db().run_query(f"SELECT * FROM csv_data {build_where_clause(st.session_state.filters)[0]} LIMIT 10000")
                     if result_df is not None:
                         stats_df = result_df[selected_cols].describe().T
                         st.dataframe(stats_df, use_container_width=True)
         
         elif analysis_type == "Correlation":
             st.markdown('<h3 class="subsection-title">Correlation Matrix</h3>', unsafe_allow_html=True)
-            numeric_cols = db.get_numeric_columns()
+            numeric_cols = get_db().get_numeric_columns()
             if len(numeric_cols) > 1:
-                result_df, _ = db.run_query(f"SELECT * FROM csv_data {build_where_clause(st.session_state.filters)[0]} LIMIT 10000")
+                result_df, _ = get_db().run_query(f"SELECT * FROM csv_data {build_where_clause(st.session_state.filters)[0]} LIMIT 10000")
                 if result_df is not None:
                     corr_matrix = result_df[numeric_cols].corr()
                     fig = px.imshow(corr_matrix, color_continuous_scale="RdBu_r", template="plotly_dark")
@@ -506,8 +506,8 @@ else:
     with tab4:
         st.markdown('<h2 class="section-title">SQL Query Editor</h2>', unsafe_allow_html=True)
         
-        col_names = db.get_column_names()
-        col_types = db.get_column_types()
+        col_names = get_db().get_column_names()
+        col_types = get_db().get_column_types()
         
         with st.expander("📋 Schema Reference"):
             for col in col_names:
@@ -525,7 +525,7 @@ else:
         with col1:
             if st.button("🚀 Execute", use_container_width=True, type="primary"):
                 with st.spinner("Executing..."):
-                    result_df, error = db.run_query(custom_sql)
+                    result_df, error = get_db().run_query(custom_sql)
                 if error:
                     st.error(f"❌ Error: {error}")
                 else:
@@ -546,7 +546,7 @@ else:
             label_visibility="collapsed"
         )
         
-        result_df, _ = db.run_query(f"SELECT * FROM csv_data {build_where_clause(st.session_state.filters)[0]} LIMIT 10000")
+        result_df, _ = get_db().run_query(f"SELECT * FROM csv_data {build_where_clause(st.session_state.filters)[0]} LIMIT 10000")
         
         if report_type == "Data Quality" and result_df is not None:
             quality = get_data_quality_metrics(result_df)
@@ -592,7 +592,7 @@ else:
         
         if st.button("📥 Prepare Export", use_container_width=True, type="primary"):
             with st.spinner("Preparing..."):
-                result_df, error = db.run_query(export_query)
+                result_df, error = get_db().run_query(export_query)
             
             if error:
                 st.error(f"Error: {error}")

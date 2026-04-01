@@ -257,6 +257,21 @@ def col_type_is_numeric(col_type: str) -> bool:
     return any(num_type in col_type.upper() for num_type in numeric_types)
 
 
-# Global database instance
-db = DatabaseEngine()
+# Global database instance (lazy initialization)
+_db_instance = None
+
+def get_db() -> DatabaseEngine:
+    """Get database instance with lazy initialization."""
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = DatabaseEngine()
+    return _db_instance
+
+
+# For backwards compatibility
+def __getattr__(name):
+    """Module-level getattr for lazy loading."""
+    if name == 'db':
+        return get_db()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
